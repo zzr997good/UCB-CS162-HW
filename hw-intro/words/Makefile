@@ -4,15 +4,8 @@ CC?=gcc
 CFLAGS?=-Wall -g3
 SOURCES=main.c word_count.c
 # comment the following out if you are providing your own sort_words
-BINARIES=words
-UNAME := $(shell uname -m)
 LIBRARIES=wc_sort.o
-ifeq "$(UNAME)" "aarch64"
-	LIBRARIES:=wc_sort_arm.o
-endif
-ifeq "(UNAME)" "arm64"
-	LIBRARIES:=wc_sort_arm.o
-endif
+BINARIES=words
 
 %: %.c
 	$(CC) $(CFLAGS) $(LIBRARIES) -o $@ $^
