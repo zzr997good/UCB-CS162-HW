@@ -1,4 +1,9 @@
 CC?=gcc
+
+ifneq (,$(shell which i386-gcc))
+CC=i386-gcc
+endif
+
 CFLAGS?=-g
 BINARIES=map limits
 
