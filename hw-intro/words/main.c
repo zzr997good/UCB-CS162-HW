@@ -46,7 +46,24 @@ WordCount *word_counts = NULL;
  */
 int num_words(FILE* infile) {
   int num_words = 0;
-
+  if(!infile){
+    perror("num_words:File is not open");
+    return -1;
+  }
+  int c;
+  int length=0;
+  while((c=fgetc(infile))!=EOF){
+    //get an alphabetic letter
+    if(isalpha(c)){
+      ++length;
+    }
+    //get a non-alphabetic letter could be ' ' or other
+    else{
+      if(length>1) ++num_words;
+      length=0;
+    }
+  }
+  if(length>1) ++num_words;
   return num_words;
 }
 
@@ -133,10 +150,20 @@ int main (int argc, char *argv[]) {
   if ((argc - optind) < 1) {
     // No input file specified, instead, read from STDIN instead.
     infile = stdin;
+    if(!infile) perror("Fail to open the file\n");
+    if(count_mode) total_words+=num_words(infile);
   } else {
     // At least one file specified. Useful functions: fopen(), fclose().
     // The first file can be found at argv[optind]. The last file can be
     // found at argv[argc-1].
+    for(int i=optind;i<argc;i++){
+      infile=fopen(argv[i],"r");
+      //If could not open the file
+      if(!infile) perror("Fail to open the file\n");
+      if(count_mode) total_words+=num_words(infile);
+      else count_words(&word_counts,infile);
+      fclose(infile);
+    }
   }
 
   if (count_mode) {
