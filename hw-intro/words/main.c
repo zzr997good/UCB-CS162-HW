@@ -31,7 +31,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <stdlib.h>
 
 #include "word_count.h"
-
+// #define MAIN_DEBUG
 /* Global data structure tracking the words encountered */
 WordCount *word_counts = NULL;
 
@@ -79,6 +79,50 @@ int num_words(FILE* infile) {
  * and 0 otherwise.
  */
 int count_words(WordCount **wclist, FILE *infile) {
+  if(!infile){
+    perror("count_words:File is not open");
+    return -1;
+  }
+  int c;
+  int length=0;
+  char buffer[65];
+  while((c=fgetc(infile))!=EOF){
+    //get an alphabetic letter
+    #ifdef MAIN_DEBUG
+    printf("read a char:%c\n",c);
+    #endif
+    if(isalpha(c)){
+      buffer[length++]=tolower(c);
+    }
+    //get a non-alphabetic letter could be ' ' or other
+    else{
+      if(length>1) {
+        buffer[length]='\0';
+        char *str=malloc(sizeof(char)*length+1);
+        strcpy(str,buffer);
+        #ifdef MAIN_DEBUG
+        printf("add the word:%s\n",str);
+        #endif
+        if(add_word(wclist,str)!=0){
+          printf("ERROR:count_words()->add_word() fails");
+          return 1;
+        }
+      }
+      length=0;
+    }
+  }
+  if(length>1) {
+    buffer[length]='\0';
+    // printf("add the word:%s\n",buffer);
+    char *str=malloc(sizeof(char)*length+1);
+    strcpy(str,buffer);
+    if(add_word(wclist,str)!=0){
+      printf("ERROR:count_words()->add_word() fails");
+      return 1;
+    }
+  }
+  return 0;
+
   return 0;
 }
 
@@ -87,7 +131,7 @@ int count_words(WordCount **wclist, FILE *infile) {
  * Useful function: strcmp().
  */
 static bool wordcount_less(const WordCount *wc1, const WordCount *wc2) {
-  return 0;
+  return (wc1->count==wc2->count?(strcmp(wc1->word,wc2->word)<0):(wc1->count<wc2->count));
 }
 
 // In trying times, displays a helpful message.
