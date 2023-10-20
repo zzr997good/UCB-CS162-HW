@@ -102,3 +102,14 @@ int main(int argc, char *argv[]) {
 
 // Quit GDB.
 // (gdb) q
+
+//What segment(s)/section(s) contains global variables? Hint: look for the variables foo and stuff.
+//.text for code
+//.data for initialized global/static variable
+//.rodata(readonly-data) for initialized global/static literal such as string literal
+//.bss for uninitialized global/static variable/literal
+//foo is in .bss and stuff is in .data
+
+
+//Do you see the stack segment anywhere? What about the heap? Explain.
+//stack and heap are runtime concept, so they will be dynamically created when the process is running instead of being arranged in compiling.
