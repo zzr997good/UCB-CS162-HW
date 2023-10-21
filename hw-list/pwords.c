@@ -35,6 +35,24 @@
 /*
  * main - handle command line, spawning one thread per file.
  */
+
+typedef struct thread_args_t{
+  const char* filename;
+  word_count_list_t* word_counts;
+}thread_args_t;
+
+void* process_file(void* args){
+  thread_args_t* params=(thread_args_t*) args;
+  FILE* infile=fopen(params->filename,"r");
+  if(infile==NULL){
+    perror("fopen fails");
+    return NULL;
+  }
+  count_words(params->word_counts,infile);
+  fclose(infile);
+  return NULL;
+}
+
 int main(int argc, char* argv[]) {
   /* Create the empty data structure. */
   word_count_list_t word_counts;
@@ -45,6 +63,19 @@ int main(int argc, char* argv[]) {
     count_words(&word_counts, stdin);
   } else {
     /* TODO */
+    int rc;
+    pthread_t threads[argc-1];
+    thread_args_t thread_args[argc-1];
+    for (size_t t = 1; t < argc; t++) {
+      thread_args[t-1].filename=argv[t];
+      thread_args[t-1].word_counts=&word_counts;
+      rc = pthread_create(&threads[t-1], NULL, process_file, (void*)&thread_args[t-1]);
+      if (rc) {
+        printf("ERROR; return code from pthread_create() is %d\n", rc);
+        exit(-1);
+      }
+    }
+    for(size_t t=0;t<argc-1;t++) pthread_join(threads[t],NULL);
   }
 
   /* Output final result of all threads' work. */
