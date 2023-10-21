@@ -31,6 +31,7 @@
 #include "word_count.h"
 
 void init_words(word_count_list_t* wclist) { /* TODO */
+  
 }
 
 size_t len_words(word_count_list_t* wclist) {
