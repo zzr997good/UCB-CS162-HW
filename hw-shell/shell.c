@@ -43,12 +43,10 @@ typedef struct fun_desc {
   char* doc;
 } fun_desc_t;
 
-fun_desc_t cmd_table[] = {
-    {cmd_help, "?", "show this help menu"},
-    {cmd_exit, "exit", "exit the command shell"},
-    {cmd_pwd,"pwd","print the current working directory"},
-    {cmd_cd,"cd","change the current working directory"}
-};
+fun_desc_t cmd_table[] = {{cmd_help, "?", "show this help menu"},
+                          {cmd_exit, "exit", "exit the command shell"},
+                          {cmd_pwd, "pwd", "print the current working directory"},
+                          {cmd_cd, "cd", "change the current working directory"}};
 
 /* Prints a helpful description for the given command */
 int cmd_help(unused struct tokens* tokens) {
@@ -61,21 +59,22 @@ int cmd_help(unused struct tokens* tokens) {
 int cmd_exit(unused struct tokens* tokens) { exit(0); }
 
 /* Print the current working directory*/
-int cmd_pwd(unused struct tokens* tokens){
+int cmd_pwd(unused struct tokens* tokens) {
   char buf[1024];
-  if(getcwd(buf,1024)==NULL){
+  if (getcwd(buf, 1024) == NULL) {
     perror("pwd error");
-  }
-  else printf("%s\n",buf);
+  } else
+    printf("%s\n", buf);
   return 1;
 }
 
-int cmd_cd(struct tokens* tokens){
-  char* path=tokens_get_token(tokens, 1);
-  if(chdir(path)!=0) perror("cd error");;
+int cmd_cd(struct tokens* tokens) {
+  char* path = tokens_get_token(tokens, 1);
+  if (chdir(path) != 0)
+    perror("cd error");
+  ;
   return 1;
 }
-
 
 /* Looks up the built-in command, if it exists. */
 int lookup(char cmd[]) {
@@ -132,7 +131,38 @@ int main(unused int argc, unused char* argv[]) {
       cmd_table[fundex].fun(tokens);
     } else {
       /* REPLACE this to run commands as programs. */
-      fprintf(stdout, "This shell doesn't know how to run programs.\n");
+      //fprintf(stdout, "This shell doesn't know how to run programs.\n");
+      int status;
+      pid_t pid;
+      pid = fork();
+      if (pid < 0) {
+        perror("fork");
+        exit(EXIT_FAILURE);
+      }
+      //child process
+      else if (pid == 0) {
+        printf("Here is child\n");
+        size_t n = tokens_get_length(tokens);
+        /* If you put the parameters in char*[n],all params will be destroyed 
+        when the current process is replaced because the string literal in 
+        read-only data segment of current process is cleared
+        */
+        //char* params[n];
+        char** params=malloc(n*sizeof(char*));
+        for (int i = 0; i < n; ++i){
+          char* arg=tokens_get_token(tokens, i);
+          params[i]=malloc(strlen(arg)+1);
+          strcpy(params[i],arg);
+          printf("params[%d]:%s\n",i,params[i]);
+        }
+        execv(tokens_get_token(tokens, 0), params);
+      }
+      //parent process
+      else{
+        printf("Here is parent\n");
+        wait(&status);
+        printf("Child returns and here is parent\n");
+      }
     }
 
     if (shell_is_interactive)
@@ -142,6 +172,5 @@ int main(unused int argc, unused char* argv[]) {
     /* Clean up memory */
     tokens_destroy(tokens);
   }
-
   return 0;
 }
