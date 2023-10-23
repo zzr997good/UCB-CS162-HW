@@ -135,6 +135,39 @@ char* make_abs_path(const char* path,char** PATH,int sz){
   return NULL;
 }
 
+void process_redirection(char ** params,size_t n){
+  int infd=0;
+  int outfd=0;
+  for(int i=0;i<n;i++){
+    //Find the output redirection
+    if(strcmp(params[i],">")==0){
+      params[i]=NULL;
+      char* filename=malloc(strlen(params[i+1])+1);
+      strcpy(filename,params[i+1]);
+      outfd=creat(filename,0644);
+      if(outfd<0){
+        perror("open output file fails");
+        exit(0);
+      }
+      dup2(outfd,STDOUT_FILENO);
+      close(outfd);
+    }
+    //Find the input redirection
+    else if(strcmp(params[i],"<")==0){
+      params[i]=NULL;
+      char* filename=malloc(strlen(params[i+1])+1);
+      strcpy(filename,params[i+1]);
+      infd=open(filename,O_RDONLY);
+      if(infd==-1){
+        perror("open input file fails");
+        exit(0);
+      }
+      dup2(infd,STDIN_FILENO);
+      close(infd);
+    }
+  }
+}
+
 int main(unused int argc, unused char* argv[]) {
   init_shell();
 
@@ -197,6 +230,7 @@ int main(unused int argc, unused char* argv[]) {
         //Tip4:execvp("wc",params) will search wc in the PATH ENV
         //Tip5:execvp("wc",params) will not translate wc as ./wc automically
         char* filepath=isvalid(params[0])?params[0]:make_abs_path(params[0],PATH,sz);
+        process_redirection(params,n);
         execv(filepath, params);
       }
       //parent process
