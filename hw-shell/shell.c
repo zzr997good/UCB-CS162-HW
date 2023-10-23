@@ -72,7 +72,6 @@ int cmd_cd(struct tokens* tokens) {
   char* path = tokens_get_token(tokens, 1);
   if (chdir(path) != 0)
     perror("cd error");
-  ;
   return 1;
 }
 
@@ -110,6 +109,32 @@ void init_shell() {
   }
 }
 
+/*
+Check whether the path is the absolute path, the relative path or the filename in cwd, which is valid for execv()
+*/
+bool isvalid(const char* path){
+  if(path[0]=='/'||path[0]=='.') return true;
+  char buf[1024];
+  getcwd(buf,1024);
+  strcat (buf,"/");
+  strcat (buf,path);
+  if(access(buf,F_OK)==0) return true;
+  else return false;
+}
+
+char* make_abs_path(const char* path,char** PATH,int sz){
+  for(int i=0;i<sz;++i){
+    char* dir=malloc(100);
+    dir[0]='\0';
+    strcat(dir,PATH[i]);
+    strcat(dir,"/");
+    strcat(dir,path);
+    if(access(dir,F_OK)==0) return dir;
+    else free(dir);
+  }
+  return NULL;
+}
+
 int main(unused int argc, unused char* argv[]) {
   init_shell();
 
@@ -141,27 +166,44 @@ int main(unused int argc, unused char* argv[]) {
       }
       //child process
       else if (pid == 0) {
-        printf("Here is child\n");
+        //Get the environment "PATH"
+        //printf("Here is child\n");
+        char *PATH[100];
+        int sz=0;
+        char *pathvar=getenv("PATH");
+        char *saveptr;
+        char *token;
+        token=strtok_r(pathvar,":",&saveptr);
+        while(token){
+          PATH[sz++]=token;
+          token=strtok_r(NULL,":",&saveptr);
+        }
         size_t n = tokens_get_length(tokens);
         /* If you put the parameters in char*[n],all params will be destroyed 
         when the current process is replaced because the string literal in 
         read-only data segment of current process is cleared
         */
         //char* params[n];
-        char** params=malloc(n*sizeof(char*));
+        char** params=malloc((n+1)*sizeof(char*));
         for (int i = 0; i < n; ++i){
           char* arg=tokens_get_token(tokens, i);
           params[i]=malloc(strlen(arg)+1);
           strcpy(params[i],arg);
-          printf("params[%d]:%s\n",i,params[i]);
         }
-        execv(tokens_get_token(tokens, 0), params);
+        params[n]=NULL;
+        //Tip1:execv("hello",params) will translate hello as ./hello, which will be translated to the absolute path
+        //Tip2:execv("wc",params) will not run the new process if wc is not a file in cwd
+        //Tip3:execv("wc",params) will not search wc in the PATH ENV
+        //Tip4:execvp("wc",params) will search wc in the PATH ENV
+        //Tip5:execvp("wc",params) will not translate wc as ./wc automically
+        char* filepath=isvalid(params[0])?params[0]:make_abs_path(params[0],PATH,sz);
+        execv(filepath, params);
       }
       //parent process
       else{
-        printf("Here is parent\n");
+        //printf("Here is parent\n");
         wait(&status);
-        printf("Child returns and here is parent\n");
+        //printf("Child returns and here is parent\n");
       }
     }
 
