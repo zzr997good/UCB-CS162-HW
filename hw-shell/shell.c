@@ -110,61 +110,193 @@ void init_shell() {
 }
 
 /*
-Check whether the path is the absolute path, the relative path or the filename in cwd, which is valid for execv()
+Get the environment variable PATH, and split them into string array
 */
-bool isvalid(const char* path){
-  if(path[0]=='/'||path[0]=='.') return true;
-  char buf[1024];
-  getcwd(buf,1024);
-  strcat (buf,"/");
-  strcat (buf,path);
-  if(access(buf,F_OK)==0) return true;
-  else return false;
+char** get_env_path(size_t* sz) {
+  char** PATH = malloc(100 * sizeof(char*));
+  *sz = 0;
+  char* pathvar = getenv("PATH");
+  char* saveptr;
+  char* token;
+  token = strtok_r(pathvar, ":", &saveptr);
+  while (token) {
+    PATH[*sz] = malloc(strlen(token) + 1);
+    strcpy(PATH[*sz], token);
+    (*sz)++;
+    token = strtok_r(NULL, ":", &saveptr);
+  }
+  return PATH;
 }
 
-char* make_abs_path(const char* path,char** PATH,int sz){
-  for(int i=0;i<sz;++i){
-    char* dir=malloc(100);
-    dir[0]='\0';
-    strcat(dir,PATH[i]);
-    strcat(dir,"/");
-    strcat(dir,path);
-    if(access(dir,F_OK)==0) return dir;
-    else free(dir);
+/*
+Get program params
+*/
+char** get_params(struct tokens* tokens, size_t* n) {
+  *n = tokens_get_length(tokens);
+  char** params = malloc((*n + 1) * sizeof(char*));
+  for (int i = 0; i < (*n); ++i) {
+    char* arg = tokens_get_token(tokens, i);
+    params[i] = malloc(strlen(arg) + 1);
+    strcpy(params[i], arg);
+  }
+  params[*n] = NULL;
+  return params;
+}
+
+/*
+Check whether the path is the absolute path, the relative path or the filename in cwd, which is valid for execv()
+*/
+bool isvalid(const char* path) {
+  if (path[0] == '/' || path[0] == '.')
+    return true;
+  char buf[1024];
+  getcwd(buf, 1024);
+  strcat(buf, "/");
+  strcat(buf, path);
+  if (access(buf, F_OK) == 0)
+    return true;
+  else
+    return false;
+}
+
+/*
+If the path is not absolute path, make it a absolute path
+*/
+char* make_abs_path(const char* path, char** PATH, const int sz) {
+  for (int i = 0; i < sz; ++i) {
+    char* dir = malloc(100);
+    dir[0] = '\0';
+    strcat(dir, PATH[i]);
+    strcat(dir, "/");
+    strcat(dir, path);
+    if (access(dir, F_OK) == 0)
+      return dir;
+    else
+      free(dir);
   }
   return NULL;
 }
 
-void process_redirection(char ** params,size_t n){
-  int infd=0;
-  int outfd=0;
-  for(int i=0;i<n;i++){
+/*
+Process the redirection
+*/
+void process_redirection(char** params, const size_t n) {
+  int infd = 0;
+  int outfd = 0;
+  for (int i = 0; i < n; i++) {
     //Find the output redirection
-    if(strcmp(params[i],">")==0){
-      params[i]=NULL;
-      char* filename=malloc(strlen(params[i+1])+1);
-      strcpy(filename,params[i+1]);
-      outfd=creat(filename,0644);
-      if(outfd<0){
+    if (strcmp(params[i], ">") == 0) {
+      params[i] = NULL;
+      char* filename = malloc(strlen(params[i + 1]) + 1);
+      strcpy(filename, params[i + 1]);
+      outfd = creat(filename, 0644);
+      if (outfd < 0) {
         perror("open output file fails");
         exit(0);
       }
-      dup2(outfd,STDOUT_FILENO);
+      dup2(outfd, STDOUT_FILENO);
       close(outfd);
     }
     //Find the input redirection
-    else if(strcmp(params[i],"<")==0){
-      params[i]=NULL;
-      char* filename=malloc(strlen(params[i+1])+1);
-      strcpy(filename,params[i+1]);
-      infd=open(filename,O_RDONLY);
-      if(infd==-1){
+    else if (strcmp(params[i], "<") == 0) {
+      params[i] = NULL;
+      char* filename = malloc(strlen(params[i + 1]) + 1);
+      strcpy(filename, params[i + 1]);
+      infd = open(filename, O_RDONLY);
+      if (infd == -1) {
         perror("open input file fails");
         exit(0);
       }
-      dup2(infd,STDIN_FILENO);
+      dup2(infd, STDIN_FILENO);
       close(infd);
     }
+  }
+}
+
+/* Execute the single program, support the redirection and path resolution*/
+void exec_prog(char** params, const int n, char** PATH, const int sz) {
+  char* filepath = isvalid(params[0]) ? params[0] : make_abs_path(params[0], PATH, sz);
+  process_redirection(params, n);
+  execv(filepath, params);
+}
+
+/* Spawn the child process*/
+void spawn_proc(int in, int fd[2], char** argv, int argc, char** PATH, const size_t sz) {
+  pid_t pid;
+  int status;
+  pid=fork();
+  if(pid<0) {
+    perror("Fork fails");
+    exit(0);
+  }
+  else if (pid== 0) {
+    //There is no need for current program to read from the current pipe
+    close(fd[0]);
+    //Redirect the standard input to in, which is the pipe containing the result of last program
+    if (in != STDIN_FILENO) {
+      dup2(in, STDIN_FILENO);
+      close(in);
+    }
+
+    //Redirect the standard output to out
+    if (fd[1] != STDOUT_FILENO) {
+      dup2(fd[1], STDOUT_FILENO);
+      close(fd[1]);
+    }
+    exec_prog(argv,argc,PATH,sz);
+  }
+  else{
+    //Control center should not have access to write fd of current pipe
+    close(fd[1]);
+    //The read fd of last pipe is no longer needed 
+    if(in!=0) close(in);
+    //Control center only needs the read fd of current pipe and wait for the current program done.
+    wait(&status);
+  }
+}
+
+char** get_pipe_params(char** params, int start, int argc) {
+  char** argv = malloc((argc + 1) * sizeof(char*));
+  for (int j = 0; j < argc; ++j) {
+    argv[j] = malloc(strlen(params[start + j]) + 1);
+    strcpy(argv[j], params[start + j]);
+  }
+  argv[argc] = NULL;
+  return argv;
+}
+
+/* Fork the child process*/
+void fork_pipes(char** params, const int n, char** PATH, const size_t sz) {
+  int start = 0;
+  bool foundPipe = false;
+  int in = 0, fd[2];
+  for (int i = 0; i < n; ++i) {
+    //Find a pipe command
+    if (strcmp(params[i], "|") == 0) {
+      foundPipe = true;
+      int argc = i - start;
+      char** argv=get_pipe_params(params,start,argc);
+      //Generate the pipe for the pipe command
+      if(pipe(fd)!=0){
+        perror("Pile fails");
+        exit(0);
+      }
+      spawn_proc(in,fd,argv,argc,PATH,sz);
+      //the next program will read from the read fd of current pipe
+      in=fd[0];
+      start=i+1;
+    }
+  }
+  if(foundPipe){
+    //Execute the final program and output should be sent to standard output
+    int argc=n-start;
+    char** argv=get_pipe_params(params,start,argc);
+    if(in!=STDIN_FILENO)  dup2(in,STDIN_FILENO);
+    exec_prog(argv,argc,PATH,sz);
+  }
+  //No pipe command 
+  else{
+    exec_prog(params, n, PATH, sz);
   }
 }
 
@@ -201,40 +333,15 @@ int main(unused int argc, unused char* argv[]) {
       else if (pid == 0) {
         //Get the environment "PATH"
         //printf("Here is child\n");
-        char *PATH[100];
-        int sz=0;
-        char *pathvar=getenv("PATH");
-        char *saveptr;
-        char *token;
-        token=strtok_r(pathvar,":",&saveptr);
-        while(token){
-          PATH[sz++]=token;
-          token=strtok_r(NULL,":",&saveptr);
-        }
-        size_t n = tokens_get_length(tokens);
-        /* If you put the parameters in char*[n],all params will be destroyed 
-        when the current process is replaced because the string literal in 
-        read-only data segment of current process is cleared
-        */
-        //char* params[n];
-        char** params=malloc((n+1)*sizeof(char*));
-        for (int i = 0; i < n; ++i){
-          char* arg=tokens_get_token(tokens, i);
-          params[i]=malloc(strlen(arg)+1);
-          strcpy(params[i],arg);
-        }
-        params[n]=NULL;
-        //Tip1:execv("hello",params) will translate hello as ./hello, which will be translated to the absolute path
-        //Tip2:execv("wc",params) will not run the new process if wc is not a file in cwd
-        //Tip3:execv("wc",params) will not search wc in the PATH ENV
-        //Tip4:execvp("wc",params) will search wc in the PATH ENV
-        //Tip5:execvp("wc",params) will not translate wc as ./wc automically
-        char* filepath=isvalid(params[0])?params[0]:make_abs_path(params[0],PATH,sz);
-        process_redirection(params,n);
-        execv(filepath, params);
+        size_t sz = 0;
+        char** PATH = get_env_path(&sz);
+        size_t n = 0;
+        char** params = get_params(tokens, &n);
+        //Current process is a "control center", it forks the process to realize the series pipe command
+        fork_pipes(params, n, PATH, sz);
       }
       //parent process
-      else{
+      else {
         //printf("Here is parent\n");
         wait(&status);
         //printf("Child returns and here is parent\n");
