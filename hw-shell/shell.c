@@ -213,6 +213,26 @@ void process_redirection(char** params, const size_t n) {
   }
 }
 
+/*Ignore all the signal*/
+void ignore_signal() {
+  signal(SIGINT, SIG_IGN);
+  signal(SIGQUIT, SIG_IGN);
+  signal(SIGTSTP, SIG_IGN);
+  signal(SIGCONT, SIG_IGN);
+  signal(SIGTTIN, SIG_IGN);
+  signal(SIGTTOU, SIG_IGN);
+}
+
+/*Open all the signal action*/
+void open_signal() {
+  signal(SIGINT, SIG_DFL);
+  signal(SIGQUIT, SIG_DFL);
+  signal(SIGTSTP, SIG_DFL);
+  signal(SIGCONT, SIG_DFL);
+  signal(SIGTTIN, SIG_DFL);
+  signal(SIGTTOU, SIG_DFL);
+}
+
 /* Execute the single program, support the redirection and path resolution*/
 void exec_prog(char** params, const int n, char** PATH, const int sz) {
   char* filepath = isvalid(params[0]) ? params[0] : make_abs_path(params[0], PATH, sz);
@@ -224,13 +244,14 @@ void exec_prog(char** params, const int n, char** PATH, const int sz) {
 void spawn_proc(int in, int fd[2], char** argv, int argc, char** PATH, const size_t sz) {
   pid_t pid;
   int status;
-  pid=fork();
-  if(pid<0) {
+  pid = fork();
+  if (pid < 0) {
     perror("Fork fails");
     exit(0);
-  }
-  else if (pid== 0) {
+  } else if (pid == 0) {
     //There is no need for current program to read from the current pipe
+    printf("SPAWN:pid: %d, SPAWN pgid: %d, terminal foreground pgid: %d\n", getpid(),
+           getpgid(getpid()), tcgetpgrp(0));
     close(fd[0]);
     //Redirect the standard input to in, which is the pipe containing the result of last program
     if (in != STDIN_FILENO) {
@@ -243,13 +264,13 @@ void spawn_proc(int in, int fd[2], char** argv, int argc, char** PATH, const siz
       dup2(fd[1], STDOUT_FILENO);
       close(fd[1]);
     }
-    exec_prog(argv,argc,PATH,sz);
-  }
-  else{
+    exec_prog(argv, argc, PATH, sz);
+  } else {
     //Control center should not have access to write fd of current pipe
     close(fd[1]);
-    //The read fd of last pipe is no longer needed 
-    if(in!=0) close(in);
+    //The read fd of last pipe is no longer needed
+    if (in != 0)
+      close(in);
     //Control center only needs the read fd of current pipe and wait for the current program done.
     wait(&status);
   }
@@ -265,8 +286,16 @@ char** get_pipe_params(char** params, int start, int argc) {
   return argv;
 }
 
-/* Fork the child process*/
+/* Execute the program depending on whether that the command is pipeline or single program*/
 void fork_pipes(char** params, const int n, char** PATH, const size_t sz) {
+  //Split out to be a single process group
+  setpgid(getpid(), getpid());
+  //Make me the foreground process group of the terminal because terminal will only send signal to foreground process group
+  tcsetpgrp(0, getpid());
+  //Open the signal
+  open_signal();
+  printf("CENTER pid: %d, CENTER pgid: %d, terminal foreground pgid: %d\n", getpid(),
+         getpgid(getpid()), tcgetpgrp(0));
   int start = 0;
   bool foundPipe = false;
   int in = 0, fd[2];
@@ -275,34 +304,42 @@ void fork_pipes(char** params, const int n, char** PATH, const size_t sz) {
     if (strcmp(params[i], "|") == 0) {
       foundPipe = true;
       int argc = i - start;
-      char** argv=get_pipe_params(params,start,argc);
+      char** argv = get_pipe_params(params, start, argc);
       //Generate the pipe for the pipe command
-      if(pipe(fd)!=0){
+      if (pipe(fd) != 0) {
         perror("Pile fails");
         exit(0);
       }
-      spawn_proc(in,fd,argv,argc,PATH,sz);
+      spawn_proc(in, fd, argv, argc, PATH, sz);
       //the next program will read from the read fd of current pipe
-      in=fd[0];
-      start=i+1;
+      in = fd[0];
+      start = i + 1;
     }
   }
-  if(foundPipe){
+  if (foundPipe) {
     //Execute the final program and output should be sent to standard output
-    int argc=n-start;
-    char** argv=get_pipe_params(params,start,argc);
-    if(in!=STDIN_FILENO)  dup2(in,STDIN_FILENO);
-    exec_prog(argv,argc,PATH,sz);
+    printf("FINAL SPAWN pid: %d, FIANL SPAWN pgid: %d, terminal foreground pgid: %d\n", getpid(),
+           getpgid(getpid()), tcgetpgrp(0));
+    int argc = n - start;
+    char** argv = get_pipe_params(params, start, argc);
+    if (in != STDIN_FILENO)
+      dup2(in, STDIN_FILENO);
+    exec_prog(argv, argc, PATH, sz);
   }
-  //No pipe command 
-  else{
+  //No pipe command
+  else {
+    printf("PROC IN CENTER pid: %d, PROC IN CENTER pgid: %d, terminal foreground pgid: %d\n",
+           getpid(), getpgid(getpid()), tcgetpgrp(0));
     exec_prog(params, n, PATH, sz);
   }
 }
 
 int main(unused int argc, unused char* argv[]) {
   init_shell();
-
+  tcsetpgrp(0, getpid());
+  ignore_signal();
+  printf("SHELL pid: %d, SHELL pgid: %d terminal foreground pgid: %d\n", getpid(),
+         getpgid(getpid()), tcgetpgrp(0));
   static char line[4096];
   int line_num = 0;
 
@@ -347,7 +384,10 @@ int main(unused int argc, unused char* argv[]) {
         //printf("Child returns and here is parent\n");
       }
     }
-
+    //My foreground position was taken over by my child and now I take it back
+    tcsetpgrp(0, getpid());
+    printf("SHELL pid: %d, SHELL pgid: %d terminal foreground pgid: %d\n", getpid(),
+           getpgid(getpid()), tcgetpgrp(0));
     if (shell_is_interactive)
       /* Please only print shell prompts when standard input is not a tty */
       fprintf(stdout, "%d: ", ++line_num);
