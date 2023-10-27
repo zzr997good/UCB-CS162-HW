@@ -31,39 +31,133 @@ char* server_files_directory;
 char* server_proxy_hostname;
 int server_proxy_port;
 
+void send_file_header(int fd, char* path) {
+  int file_fd = open(path, O_RDONLY);
+  if (file_fd < 0) {
+    fprintf(stderr, "Failed to create file descriptor %d: %s\n", errno, strerror(errno));
+    close(fd);
+    exit(errno);
+  }
+  struct stat file_stat;
+  stat(path, &file_stat);
+  char file_size[8];
+  sprintf(file_size, "%lu", file_stat.st_size);
+  http_start_response(fd, 200);
+  http_send_header(fd, "Content-Type", http_get_mime_type(path));
+  http_send_header(fd, "Content-Length", file_size); // TODO: change this line too
+  http_end_headers(fd);
+  close(file_fd);
+}
+
+/*Send body to client socket
+source==NULL means data is in buffer
+otherwise means data is in file
+*/
+void send_body(int fd, char* buffer, ssize_t buffer_size, const char* source) {
+  if (source == NULL) {
+    write(fd, buffer, buffer_size);
+  }
+  //Read from file then send to fd
+  else {
+    int file_fd = open(source, O_RDONLY);
+    ssize_t n;
+    while ((n = read(file_fd, buffer, buffer_size)) > 0) {
+      write(fd, buffer, n);
+    }
+    close(file_fd);
+  }
+}
+
 /*
  * Serves the contents the file stored at `path` to the client socket `fd`.
  * It is the caller's reponsibility to ensure that the file stored at `path` exists.
  */
+
 void serve_file(int fd, char* path) {
 
   /* TODO: PART 2 */
   /* PART 2 BEGIN */
-
-  http_start_response(fd, 200);
-  http_send_header(fd, "Content-Type", http_get_mime_type(path));
-  http_send_header(fd, "Content-Length", "0"); // TODO: change this line too
-  http_end_headers(fd);
-
+  send_file_header(fd, path);
+  char buffer[1024];
+  send_body(fd, buffer, 1024, path);
   /* PART 2 END */
+}
+
+/*Double the buffer size by 2*/
+void double_buffer_size(char** buffer,size_t* buffer_size){
+  (*buffer_size)*=2;
+  *buffer=realloc(*buffer,*buffer_size);
+}
+
+/*Concatenate two string, if the source size is not enough, extends it size*/
+void concatenate_string(char** source, char* str, size_t* source_size){
+  if(strlen(*source)+strlen(str)+1>*source_size) {
+    (*source_size)*=2;
+    *source=realloc(*source,*source_size);
+  }
+  strcat(*source,str);
 }
 
 void serve_directory(int fd, char* path) {
   http_start_response(fd, 200);
   http_send_header(fd, "Content-Type", http_get_mime_type(".html"));
   http_end_headers(fd);
-
   /* TODO: PART 3 */
   /* PART 3 BEGIN */
 
   // TODO: Open the directory (Hint: opendir() may be useful here)
-
+  DIR* dir;
+  struct dirent* dp;
+  if ((dir = opendir(path)) == NULL) {
+    perror("Cannot open directory");
+    exit(1);
+  }
+  while ((dp = readdir(dir)) != NULL) {
+    //Found the index.html
+    if (strcmp(dp->d_name, "index.html") == 0) {
+      printf("Index exits.\n");
+      char index_path[1024];
+      index_path[0] = '\0';
+      http_format_index(index_path, path);
+      serve_file(fd, index_path);
+      closedir(dir);
+      return;
+    }
+  }
   /**
    * TODO: For each entry in the directory (Hint: look at the usage of readdir() ),
    * send a string containing a properly formatted HTML. (Hint: the http_format_href()
    * function in libhttp.c may be useful here)
    */
 
+  //Index.html not found
+  closedir(dir);
+  if ((dir = opendir(path)) == NULL) {
+    perror("Cannot open directory");
+    exit(1);
+  }
+  char* html=malloc(1024*sizeof(char));
+  size_t html_size=1024;
+  html[0]='\0';
+  strcat(html,"<!DOCTYPE html>\n<html>\n<head>\n\t<title>File linkes in directory.</title>\n</head>\n<body>");
+  char* child_link = malloc(1024 * sizeof(char));
+  size_t link_size = 128;
+  child_link[0] = '\0';
+  while ((dp = readdir(dir)) != NULL) {
+    if (strlen("<a href=\"/") + strlen(path) + strlen("/") + strlen(dp->d_name) + strlen("\">") +
+            strlen(dp->d_name) + strlen("</a><br/>") + 1 >
+        link_size) {
+      printf("Extend links buffer\n");
+      double_buffer_size(&child_link,&link_size);
+    }
+    http_format_href(child_link, path, dp->d_name);
+    concatenate_string(&html,"\n\t",&html_size);
+    concatenate_string(&html,child_link,&html_size);
+  }
+  concatenate_string(&html,"\n</body>\n</html>\n",&html_size);
+  send_body(fd, html, strlen(html), NULL);
+  free(child_link);
+  closedir(dir);
   /* PART 3 END */
 }
 
@@ -117,7 +211,26 @@ void handle_files_request(int fd) {
    */
 
   /* PART 2 & 3 BEGIN */
-  
+  struct stat file_stat;
+
+  // Use the stat function to get information about the file
+  if (stat(path, &file_stat) == 0) {
+    if (S_ISREG(file_stat.st_mode)) {
+      // The file exists and is a regular file
+      printf("File exists.\n");
+      serve_file(fd, path);
+    } else if (S_ISDIR(file_stat.st_mode)) {
+      // The file exists but is not a regular file (e.g., a directory)
+      printf("The path exists, but is a directory\n");
+      serve_directory(fd, path);
+    }
+  } else {
+    // The file does not exist or there was an error
+    printf("File does not exist or an error occurred.\n");
+    http_start_response(fd, 404);
+    http_send_header(fd, "Content-Type", "text/html");
+    http_end_headers(fd);
+  }
   /* PART 2 & 3 END */
 
   close(fd);
@@ -263,11 +376,11 @@ void serve_forever(int* socket_number, void (*request_handler)(int)) {
    */
 
   /* PART 1 BEGIN */
-  if(bind(*socket_number,(struct sockaddr*)&server_address,sizeof(server_address))<0){
+  if (bind(*socket_number, (struct sockaddr*)&server_address, sizeof(server_address)) < 0) {
     perror("Failed to bind the listening socket");
     exit(errno);
   }
-  if(listen(*socket_number,1024)<0){
+  if (listen(*socket_number, 1024) < 0) {
     perror("Failed to listen the socket");
     exit(errno);
   }
