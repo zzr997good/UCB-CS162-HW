@@ -237,6 +237,29 @@ void handle_files_request(int fd) {
   return;
 }
 
+/*data structure for start_routine*/
+typedef struct func_arg{
+  int read_fd;
+  int write_fd;
+  pthread_t* depend_thread;
+}func_arg_t;
+
+void* forward(void* forward_args){
+  func_arg_t* args=(func_arg_t*) forward_args;
+  char buffer[1024];
+  ssize_t read_bytes;
+  //Read will block until there is enough data
+  //If read_bytes==0, it means the TCP connection loses
+  while((read_bytes=read(args->read_fd,buffer,1024))>0){
+    //Write will not influce the read 
+    write(args->write_fd,buffer,read_bytes);
+    printf("Sending data from socket[%d] to socket [%d]\n",args->read_fd,args->write_fd);
+  }
+  //TCP disconnects
+  printf("TCP closes by client/target.\n");
+  pthread_cancel(*(args->depend_thread));
+  pthread_exit(0);
+}
 /*
  * Opens a connection to the proxy target (hostname=server_proxy_hostname and
  * port=server_proxy_port) and relays traffic to/from the stream fd and the
@@ -300,7 +323,18 @@ void handle_proxy_request(int fd) {
 
   /* TODO: PART 4 */
   /* PART 4 BEGIN */
-
+  pthread_t client_target;
+  pthread_t target_client;
+  func_arg_t client_target_args={fd,target_fd,&target_client};
+  func_arg_t target_client_args={target_fd,fd,&client_target};
+  pthread_create(&client_target,NULL,&forward,&client_target_args);
+  pthread_create(&target_client,NULL,&forward,&target_client_args);
+  pthread_join(client_target,NULL);
+  pthread_join(target_client,NULL);
+  close(target_fd);
+  printf("Socket[%d] closed by proxy server\n",target_fd);
+  close(fd);
+  printf("Socket[%d] closed by proxy server\n",fd);
   /* PART 4 END */
 }
 
