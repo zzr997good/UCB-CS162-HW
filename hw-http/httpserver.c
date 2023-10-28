@@ -84,18 +84,18 @@ void serve_file(int fd, char* path) {
 }
 
 /*Double the buffer size by 2*/
-void double_buffer_size(char** buffer,size_t* buffer_size){
-  (*buffer_size)*=2;
-  *buffer=realloc(*buffer,*buffer_size);
+void double_buffer_size(char** buffer, size_t* buffer_size) {
+  (*buffer_size) *= 2;
+  *buffer = realloc(*buffer, *buffer_size);
 }
 
 /*Concatenate two string, if the source size is not enough, extends it size*/
-void concatenate_string(char** source, char* str, size_t* source_size){
-  if(strlen(*source)+strlen(str)+1>*source_size) {
-    (*source_size)*=2;
-    *source=realloc(*source,*source_size);
+void concatenate_string(char** source, char* str, size_t* source_size) {
+  if (strlen(*source) + strlen(str) + 1 > *source_size) {
+    (*source_size) *= 2;
+    *source = realloc(*source, *source_size);
   }
-  strcat(*source,str);
+  strcat(*source, str);
 }
 
 void serve_directory(int fd, char* path) {
@@ -136,10 +136,11 @@ void serve_directory(int fd, char* path) {
     perror("Cannot open directory");
     exit(1);
   }
-  char* html=malloc(1024*sizeof(char));
-  size_t html_size=1024;
-  html[0]='\0';
-  strcat(html,"<!DOCTYPE html>\n<html>\n<head>\n\t<title>File linkes in directory.</title>\n</head>\n<body>");
+  char* html = malloc(1024 * sizeof(char));
+  size_t html_size = 1024;
+  html[0] = '\0';
+  strcat(html, "<!DOCTYPE html>\n<html>\n<head>\n\t<title>File linkes in "
+               "directory.</title>\n</head>\n<body>");
   char* child_link = malloc(1024 * sizeof(char));
   size_t link_size = 128;
   child_link[0] = '\0';
@@ -148,13 +149,13 @@ void serve_directory(int fd, char* path) {
             strlen(dp->d_name) + strlen("</a><br/>") + 1 >
         link_size) {
       printf("Extend links buffer\n");
-      double_buffer_size(&child_link,&link_size);
+      double_buffer_size(&child_link, &link_size);
     }
     http_format_href(child_link, path, dp->d_name);
-    concatenate_string(&html,"\n\t",&html_size);
-    concatenate_string(&html,child_link,&html_size);
+    concatenate_string(&html, "\n\t", &html_size);
+    concatenate_string(&html, child_link, &html_size);
   }
-  concatenate_string(&html,"\n</body>\n</html>\n",&html_size);
+  concatenate_string(&html, "\n</body>\n</html>\n", &html_size);
   send_body(fd, html, strlen(html), NULL);
   free(child_link);
   closedir(dir);
@@ -238,22 +239,22 @@ void handle_files_request(int fd) {
 }
 
 /*data structure for start_routine*/
-typedef struct func_arg{
+typedef struct func_arg {
   int read_fd;
   int write_fd;
   pthread_t* depend_thread;
-}func_arg_t;
+} func_arg_t;
 
-void* forward(void* forward_args){
-  func_arg_t* args=(func_arg_t*) forward_args;
+void* forward(void* forward_args) {
+  func_arg_t* args = (func_arg_t*)forward_args;
   char buffer[1024];
   ssize_t read_bytes;
   //Read will block until there is enough data
   //If read_bytes==0, it means the TCP connection loses
-  while((read_bytes=read(args->read_fd,buffer,1024))>0){
-    //Write will not influce the read 
-    write(args->write_fd,buffer,read_bytes);
-    printf("Sending data from socket[%d] to socket [%d]\n",args->read_fd,args->write_fd);
+  while ((read_bytes = read(args->read_fd, buffer, 1024)) > 0) {
+    //Write will not influce the read
+    write(args->write_fd, buffer, read_bytes);
+    printf("Sending data from socket[%d] to socket [%d]\n", args->read_fd, args->write_fd);
   }
   //TCP disconnects
   printf("TCP closes by client/target.\n");
@@ -325,16 +326,16 @@ void handle_proxy_request(int fd) {
   /* PART 4 BEGIN */
   pthread_t client_target;
   pthread_t target_client;
-  func_arg_t client_target_args={fd,target_fd,&target_client};
-  func_arg_t target_client_args={target_fd,fd,&client_target};
-  pthread_create(&client_target,NULL,&forward,&client_target_args);
-  pthread_create(&target_client,NULL,&forward,&target_client_args);
-  pthread_join(client_target,NULL);
-  pthread_join(target_client,NULL);
+  func_arg_t client_target_args = {fd, target_fd, &target_client};
+  func_arg_t target_client_args = {target_fd, fd, &client_target};
+  pthread_create(&client_target, NULL, &forward, &client_target_args);
+  pthread_create(&target_client, NULL, &forward, &target_client_args);
+  pthread_join(client_target, NULL);
+  pthread_join(target_client, NULL);
   close(target_fd);
-  printf("Socket[%d] closed by proxy server\n",target_fd);
+  printf("Socket[%d] closed by proxy server\n", target_fd);
   close(fd);
-  printf("Socket[%d] closed by proxy server\n",fd);
+  printf("Socket[%d] closed by proxy server\n", fd);
   /* PART 4 END */
 }
 
@@ -464,7 +465,19 @@ void serve_forever(int* socket_number, void (*request_handler)(int)) {
      */
 
     /* PART 5 BEGIN */
-
+    pid_t pid;
+    pid = fork();
+    if (pid < 0) {
+      perror("Fork child process for serving fails");
+      exit(errno);
+    } else if (pid == 0) {
+      close(*socket_number);
+      printf("Child process for serving creates\n");
+      request_handler(client_socket_number);
+      exit(EXIT_SUCCESS);
+    } else {
+      close(client_socket_number);
+    }
     /* PART 5 END */
 
 #elif THREADSERVER
