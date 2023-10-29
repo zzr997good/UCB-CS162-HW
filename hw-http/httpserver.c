@@ -233,8 +233,8 @@ void handle_files_request(int fd) {
     http_end_headers(fd);
   }
   /* PART 2 & 3 END */
-
   close(fd);
+  printf("Serving finishes. Socket[%d] closed by proxy server\n", fd);
   return;
 }
 
@@ -333,9 +333,9 @@ void handle_proxy_request(int fd) {
   pthread_join(client_target, NULL);
   pthread_join(target_client, NULL);
   close(target_fd);
-  printf("Socket[%d] closed by proxy server\n", target_fd);
+  printf("Serving finishes. Socket[%d] closed by proxy server\n", target_fd);
   close(fd);
-  printf("Socket[%d] closed by proxy server\n", fd);
+  printf("Serving finishes. Socket[%d] closed by proxy server\n", fd);
   /* PART 4 END */
 }
 
@@ -369,6 +369,19 @@ void init_thread_pool(int num_threads, void (*request_handler)(int)) {
   /* PART 7 END */
 }
 #endif
+
+/*Arguments for start rountine of the new thread to handle request*/
+typedef struct thread_args {
+  int client_socket_number;
+  void (*request_handler)(int);
+} thread_args_t;
+
+/*Start rountine of the new thread to handle request*/
+void* thread_request_handler(void* _args) {
+  thread_args_t* args = (thread_args_t*)_args;
+  args->request_handler(args->client_socket_number);
+  pthread_exit(0);
+}
 
 /*
  * Opens a TCP stream socket on all interfaces with port number PORTNO. Saves
@@ -492,7 +505,12 @@ void serve_forever(int* socket_number, void (*request_handler)(int)) {
      */
 
     /* PART 6 BEGIN */
-
+    pthread_t server_thread;
+    //Here args->client_number is a copy of client_socket_number
+    //So the modification of client_socket_number in main thread will not influce args->client_socket_number
+    //Otherwise we need to malloc new memory for client_socket_number
+    thread_args_t args = {client_socket_number, request_handler};
+    pthread_create(&server_thread, NULL, thread_request_handler, (void*)&args);
     /* PART 6 END */
 #elif POOLSERVER
     /*
